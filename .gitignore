@@ -1,0 +1,12 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Environment variables
+.env
+
+# Dataset / raw files
+/data/
+
+# OS files
+.DS_Store

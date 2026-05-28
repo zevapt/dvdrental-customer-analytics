@@ -1,21 +1,17 @@
 """
-analytics/segmentation.py
+analytics/rfm.py
 RFM segmentation and spending tier quartile analysis.
 """
 import pandas as pd
 from database.connection import run_query
 
 RFM_SQL = """
-WITH reference_date AS (
-    SELECT MAX(payment_date)::DATE AS ref_date FROM payment
-),
-raw_rfm AS (
+WITH raw_rfm AS (
     SELECT
         c.customer_id,
         c.first_name || ' ' || c.last_name                 AS customer_name,
         c.email,
-        (SELECT ref_date FROM reference_date)
-            - MAX(r.rental_date)::DATE                      AS recency_days,
+        CURRENT_DATE - MAX(p.payment_date)::DATE                     AS recency_days,
         COUNT(DISTINCT r.rental_id)                         AS frequency,
         ROUND(SUM(p.amount)::NUMERIC, 2)                    AS monetary
     FROM customer  c
@@ -23,34 +19,54 @@ raw_rfm AS (
     JOIN payment   p ON r.rental_id   = p.rental_id
     GROUP BY c.customer_id, c.first_name, c.last_name, c.email
 ),
+-- Calculate RFM score thresholds based on the distribution of frequency and monetary values.
+thresholds AS (
+    SELECT
+        -- Frequency Cutoffs (e.g., Median, 75th, and a strict 90th percentile for Peak)
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY frequency) AS f25,
+        PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY frequency) AS f50,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY frequency) AS f75,
+        PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY frequency) AS f90, -- Top 10%
+        
+        -- Monetary Cutoffs (Strict percentiles to isolate the highest-paying pink dots)
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY monetary)  AS m25,
+        PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY monetary)  AS m50,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY monetary)  AS m75,
+        PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY monetary)  AS m90  -- Top 10% (Peak LTV)
+    FROM raw_rfm
+),
 scored AS (
     SELECT
         *,
-        5 - NTILE(4) OVER (ORDER BY recency_days DESC) + 1 AS r_score,
-        NTILE(4) OVER (ORDER BY frequency ASC)              AS f_score,
-        NTILE(4) OVER (ORDER BY monetary  ASC)              AS m_score
-    FROM raw_rfm
-),
-segmented AS (
-    SELECT
-        *,
-        CASE
-            WHEN r_score >= 4 AND f_score >= 4 AND m_score >= 4
-                THEN 'Champions'
-            WHEN r_score >= 2 AND f_score >= 3 AND m_score >= 3
-                THEN 'Loyal Customers'
-            WHEN r_score >= 3 AND f_score <= 3
-                THEN 'Potential Loyalists'
-            WHEN r_score BETWEEN 2 AND 3 AND f_score >= 2 AND m_score >= 2
-                THEN 'At Risk'
-            ELSE 'Lost Customers'
-        END AS segment
-    FROM scored
+        -- Fixed day boundaries ensure old transactions never get  5
+        CASE 
+            WHEN raw_rfm.recency_days <= 30  THEN 4
+            WHEN raw_rfm.recency_days <= 90  THEN 3
+            WHEN raw_rfm.recency_days <= 180 THEN 2
+            ELSE 1 
+        END AS r_score,
+        
+        -- Statistical Frequency scoring using thresholds
+        CASE 
+            WHEN raw_rfm.frequency >= thresholds.f90 THEN 4  -- Only your extreme power renters
+            WHEN raw_rfm.frequency >= thresholds.f75 THEN 3
+            WHEN raw_rfm.frequency >= thresholds.f50 THEN 2
+            ELSE 1 
+        END AS f_score,
+        
+        -- Statistical Monetary scoring using thresholds
+        CASE 
+            WHEN raw_rfm.monetary >= thresholds.m90 THEN 4   -- Limits '4' to only the peak of your LTV curve
+            WHEN raw_rfm.monetary >= thresholds.m75 THEN 3
+            WHEN raw_rfm.monetary >= thresholds.m50 THEN 2
+            ELSE 1 
+        END AS m_score
+    FROM raw_rfm, thresholds
 )
 SELECT customer_id, customer_name, email,
        recency_days, frequency, monetary,
-       r_score, f_score, m_score, segment
-FROM segmented
+       r_score, f_score, m_score
+FROM scored
 ORDER BY monetary DESC
 """
 

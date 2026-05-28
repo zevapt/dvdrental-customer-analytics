@@ -8,7 +8,7 @@ import pandas as pd
 
 from analytics.insights import get_at_risk_customers, generate_insights
 from analytics.behavior import get_rentals_vs_revenue
-from analytics.segmentation import get_rfm_data
+from analytics.rfm import get_rfm_data
 from dashboard.components import section_header, render_insight_cards, export_csv_button
 from config.settings import COLORS
 

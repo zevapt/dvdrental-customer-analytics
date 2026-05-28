@@ -20,7 +20,7 @@ def render_kpi_cards(kpis: dict):
     """Renders five KPI cards in a responsive row."""
     cols = st.columns(5)
     cards = [
-        ("TOTAL CUSTOMERS",   f"{kpis.get('total_customers', 0):,}",   "active customers",      ""),
+        ("TOTAL CUSTOMERS",   f"{kpis.get('total_customers', 0):,}",   "customers",      ""),
         ("TOTAL REVENUE",     f"${kpis.get('total_revenue', 0):,.2f}", "all transactions",      ""),
         ("TOTAL RENTALS",     f"{kpis.get('total_rentals', 0):,}",     "all time",              "blue"),
         ("AVG TRANSACTION",   f"${kpis.get('avg_transaction_value', 0):.2f}", "per payment",   "blue"),

@@ -11,7 +11,7 @@ from scipy import stats
 from analytics.customers import get_top_customers, get_customers_by_country
 from analytics.behavior import get_genre_popularity, get_rentals_vs_revenue
 from analytics.insights import get_correlation
-from analytics.segmentation import get_rfm_data, get_spending_tiers
+from analytics.rfm import get_rfm_data, get_spending_tiers
 from ml.clustering import fit_clusters, cluster_summary
 from dashboard.components import render_hero, section_header, export_csv_button
 from config.settings import COLORS, SPENDING_TIER_COLORS
@@ -219,6 +219,68 @@ def render():
             st.plotly_chart(fig_scatter, use_container_width=True)
 
     with tab2:
+        # ── K-Means Clustering (ML) ────────────────────────────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        section_header("ML CLUSTERING", "K-Means Customer Clusters on RFM Space")
+        
+        with st.spinner("Computing RFM segments…"):
+            rfm_df = get_rfm_data()
+
+        if rfm_df.empty:
+            st.warning("No RFM data.")
+            return
+        
+        st.markdown(
+            '<span class="ml-badge">scikit-learn</span>'
+            "<span style='font-size:0.82rem;color:#6B7A8D;margin-left:0.5rem;'>"
+            "Unsupervised K-Means (k=4) - data-driven complement to rule-based RFM scoring</span>",
+            unsafe_allow_html=True,
+        )
+
+        with st.spinner("Training K-Means model…"):
+            labeled_df, model_info = fit_clusters(rfm_df)
+            summary_df = cluster_summary(labeled_df)
+
+        col5, col6 = st.columns([7, 3], gap="large")
+        with col5:
+            cluster_colors = {
+                "Champions": SEGMENT_COLORS["Champions"],
+                "Loyal Customers": SEGMENT_COLORS["Loyal Customers"],
+                "Potential Loyalists": SEGMENT_COLORS["Potential Loyalists"],
+                "Lost Customers": SEGMENT_COLORS["Lost Customers"],
+            }
+            fig_cl = go.Figure()
+            for label, color in cluster_colors.items():
+                sub = labeled_df[labeled_df["cluster_label"] == label]
+                fig_cl.add_trace(go.Scatter(
+                    x=sub["frequency"], y=sub["monetary"],
+                    mode="markers",
+                    name=label,
+                    marker=dict(color=color, size=7, opacity=0.7),
+                    hovertemplate="<b>%{customdata}</b><br>F: %{x} | M: $%{y:.2f}<extra></extra>",
+                    customdata=sub["customer_name"],
+                ))
+            fig_cl.update_layout(
+                height=360, margin=dict(l=60,r=20,t=30,b=40),
+                title=dict(text="Frequency vs Monetary by Cluster",
+                        font=dict(size=14, color=COLORS["primary"])),
+                xaxis=dict(title="Frequency (rentals)", showgrid=True, gridcolor="#F0F2F5"),
+                yaxis=dict(title="Monetary ($)", tickprefix="$", showgrid=True, gridcolor="#F0F2F5"),
+                plot_bgcolor="white", paper_bgcolor="white",
+            )
+            st.plotly_chart(fig_cl, use_container_width=True)
+
+        with col6:
+            st.markdown(f"""
+            <div style="background:#EEF2FF;border-radius:8px;padding:0.75rem 1rem;
+                        margin-top:0.5rem;font-size:0.8rem;color:#1B2A4A;">
+                <strong>Model Quality</strong><br>
+                Silhouette Score: <strong>{model_info['silhouette_score']}</strong>
+                (>0.3 indicates meaningful separation)<br>
+                Inertia: {model_info['inertia']:,.0f}
+            </div>
+            """, unsafe_allow_html=True)
+
         # ── RFM Segmentation ──────────────────────────────────────────────────────
         section_header("RFM SEGMENTATION", "Customer Segmentation by Recency, Frequency & Monetary")
         st.markdown(
@@ -227,16 +289,10 @@ def render():
             unsafe_allow_html=True,
         )
 
-        with st.spinner("Computing RFM segments…"):
-            rfm_df = get_rfm_data()
-
-        if rfm_df.empty:
-            st.warning("No RFM data.")
-            return
-
-        seg_counts = rfm_df["segment"].value_counts().reset_index()
+        # Use K-Means cluster labels (from `labeled_df`) for segmentation visuals
+        seg_counts = labeled_df["cluster_label"].value_counts().reset_index()
         seg_counts.columns = ["segment", "count"]
-        seg_avg = rfm_df.groupby("segment")["monetary"].mean().reset_index()
+        seg_avg = labeled_df.groupby("cluster_label")["monetary"].mean().reset_index()
         seg_avg.columns = ["segment", "avg_spending"]
 
         col1, col2 = st.columns(2, gap="large")
@@ -302,9 +358,44 @@ def render():
                 """, unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
-        with st.expander("Full RFM Table"):
-            st.dataframe(rfm_df, use_container_width=True, hide_index=True)
-            export_csv_button(rfm_df, "rfm_segmentation.csv")
+        segment_options = ["All"] + seg_counts["segment"].tolist()
+        col_left, col_right = st.columns([8, 2], gap="medium")
+
+        with col_right:
+            selected_segment = st.selectbox(
+                "Filter RFM export by segment",
+                segment_options,
+            )
+
+        filtered_rfm_df = (
+            labeled_df if selected_segment == "All"
+            else labeled_df[labeled_df["cluster_label"] == selected_segment]
+        )
+
+        display_rfm_df = filtered_rfm_df.drop(columns=["cluster_id"], errors="ignore")
+
+        with col_left:
+            with st.expander(f"Full RFM Table ({selected_segment})"):
+                st.dataframe(display_rfm_df, use_container_width=True, hide_index=True, column_config={
+                    "customer_id": "Customer ID",
+                    "customer_name": "Customer Name",
+                    "email": "Email",
+                    "recency_days": "Recency (days)",
+                    "frequency": "Frequency",
+                    "monetary": "Monetary ($)",
+                    "r_score": "R Score",
+                    "f_score": "F Score",
+                    "m_score": "M Score",
+                    "segment": "Segment",
+                    "cluster_label": "Cluster Label"
+                },
+                )
+                export_csv_button(
+                    filtered_rfm_df,
+                    f"rfm_segmentation_{selected_segment.lower().replace(' ', '_')}.csv",
+                    label=("⬇ Download All RFM CSV" if selected_segment == "All"
+                           else f"⬇ Download {selected_segment} RFM CSV")
+                )
 
         # ── Spending Tier Analysis ─────────────────────────────────────────────────
         st.markdown("<br>", unsafe_allow_html=True)
@@ -351,67 +442,6 @@ def render():
                 plot_bgcolor="white", paper_bgcolor="white",
             )
             st.plotly_chart(fig_tier_bar, use_container_width=True)
-
-        # ── K-Means Clustering (ML) ────────────────────────────────────────────────
-        st.markdown("<br>", unsafe_allow_html=True)
-        section_header("ML CLUSTERING", "K-Means Customer Clusters on RFM Space")
-        st.markdown(
-            '<span class="ml-badge">scikit-learn</span>'
-            "<span style='font-size:0.82rem;color:#6B7A8D;margin-left:0.5rem;'>"
-            "Unsupervised K-Means (k=3) - data-driven complement to rule-based RFM scoring</span>",
-            unsafe_allow_html=True,
-        )
-
-        with st.spinner("Training K-Means model…"):
-            labeled_df, model_info = fit_clusters(rfm_df)
-            summary_df = cluster_summary(labeled_df)
-
-        col5, col6 = st.columns([1, 1], gap="large")
-        with col5:
-            cluster_colors = {"Premium": COLORS["accent"],
-                            "Regular": COLORS["accent2"],
-                            "Dormant": COLORS["neutral"]}
-            fig_cl = go.Figure()
-            for label, color in cluster_colors.items():
-                sub = labeled_df[labeled_df["cluster_label"] == label]
-                fig_cl.add_trace(go.Scatter(
-                    x=sub["frequency"], y=sub["monetary"],
-                    mode="markers",
-                    name=label,
-                    marker=dict(color=color, size=7, opacity=0.7),
-                    hovertemplate="<b>%{customdata}</b><br>F: %{x} | M: $%{y:.2f}<extra></extra>",
-                    customdata=sub["customer_name"],
-                ))
-            fig_cl.update_layout(
-                height=360, margin=dict(l=60,r=20,t=30,b=40),
-                title=dict(text="Frequency vs Monetary by Cluster",
-                        font=dict(size=14, color=COLORS["primary"])),
-                xaxis=dict(title="Frequency (rentals)", showgrid=True, gridcolor="#F0F2F5"),
-                yaxis=dict(title="Monetary ($)", tickprefix="$", showgrid=True, gridcolor="#F0F2F5"),
-                plot_bgcolor="white", paper_bgcolor="white",
-            )
-            st.plotly_chart(fig_cl, use_container_width=True)
-
-        with col6:
-            st.markdown("<strong style='font-size:0.9rem;color:#1B2A4A'>Cluster Summary</strong>",
-                        unsafe_allow_html=True)
-            st.dataframe(summary_df.style.format({
-                "avg_recency": "{:.0f} days",
-                "avg_frequency": "{:.1f}",
-                "avg_monetary": "${:.2f}",
-                "total_revenue": "${:,.2f}",
-            }), use_container_width=True, hide_index=True)
-            st.markdown(f"""
-            <div style="background:#EEF2FF;border-radius:8px;padding:0.75rem 1rem;
-                        margin-top:0.5rem;font-size:0.8rem;color:#1B2A4A;">
-                <strong>Model Quality</strong><br>
-                Silhouette Score: <strong>{model_info['silhouette_score']}</strong>
-                (>0.3 indicates meaningful separation)<br>
-                Inertia: {model_info['inertia']:,.0f}
-            </div>
-            """, unsafe_allow_html=True)
-
-    
 
 
 

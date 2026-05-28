@@ -51,7 +51,7 @@ with st.sidebar:
             "🏠  Executive Overview",
             "👥  Customer Intelligence",
             "⚠  Strategic Insights",
-            "🔍  Customer Profile",
+            "🔍  Customer Details",
         ],
         label_visibility="collapsed",
     )
@@ -84,4 +84,4 @@ if not ok:
 if   "Overview"   in page: pg_overview.render()
 elif "Customer I" in page: pg_customers.render()
 elif "Insights"   in page: pg_insights.render()
-elif "Profile"    in page: pg_profile.render()
+elif "Details"    in page: pg_profile.render()

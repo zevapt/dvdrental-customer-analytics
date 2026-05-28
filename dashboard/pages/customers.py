@@ -292,8 +292,8 @@ def render():
         # Use K-Means cluster labels (from `labeled_df`) for segmentation visuals
         seg_counts = labeled_df["cluster_label"].value_counts().reset_index()
         seg_counts.columns = ["segment", "count"]
-        seg_avg = labeled_df.groupby("cluster_label")["monetary"].mean().reset_index()
-        seg_avg.columns = ["segment", "avg_spending"]
+        seg_avg = labeled_df.groupby("cluster_label")["total_spent"].mean().reset_index()
+        seg_avg.columns = ["segment", "avg_total_spending"]
 
         col1, col2 = st.columns(2, gap="large")
 
@@ -318,20 +318,20 @@ def render():
             st.plotly_chart(fig_pie, use_container_width=True)
 
         with col2:
-            st.markdown("<strong style='font-size:0.9rem;color:#1B2A4A'>Avg Spending per Segment</strong><br>"
+            st.markdown("<strong style='font-size:0.9rem;color:#1B2A4A'>Avg Total Spending per Segment</strong><br>"
                         "<span style='font-size:0.78rem;color:#6B7A8D'>Champions and loyal customers make the biggest contribution</span>",
                         unsafe_allow_html=True)
             fig_bar = go.Figure(go.Bar(
                 x=seg_avg["segment"],
-                y=seg_avg["avg_spending"],
+                y=seg_avg["avg_total_spending"],
                 marker_color=[SEGMENT_COLORS.get(s, "#ccc") for s in seg_avg["segment"]],
-                text=seg_avg["avg_spending"].map("${:.2f}".format),
+                text=seg_avg["avg_total_spending"].map("${:.2f}".format),
                 textposition="outside",
             ))
             fig_bar.update_layout(
                 height=320, margin=dict(l=10,r=10,t=10,b=10),
                 xaxis=dict(title="Customer Segment"),
-                yaxis=dict(title="Avg Spending ($)", tickprefix="$"),
+                yaxis=dict(title="Avg Total Spending ($)", tickprefix="$"),
                 plot_bgcolor="white", paper_bgcolor="white",
             )
             st.plotly_chart(fig_bar, use_container_width=True)
@@ -383,6 +383,7 @@ def render():
                     "recency_days": "Recency (days)",
                     "frequency": "Frequency",
                     "monetary": "Monetary ($)",
+                    "total_spent": "Total Spent ($)",
                     "r_score": "R Score",
                     "f_score": "F Score",
                     "m_score": "M Score",

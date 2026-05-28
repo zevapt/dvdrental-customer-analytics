@@ -9,11 +9,12 @@ RFM_SQL = """
 WITH raw_rfm AS (
     SELECT
         c.customer_id,
-        c.first_name || ' ' || c.last_name                 AS customer_name,
+        c.first_name || ' ' || c.last_name                              AS customer_name,
         c.email,
-        CURRENT_DATE - MAX(p.payment_date)::DATE                     AS recency_days,
-        COUNT(DISTINCT r.rental_id)                         AS frequency,
-        ROUND(SUM(p.amount)::NUMERIC, 2)                    AS monetary
+        CURRENT_DATE - MAX(p.payment_date)::DATE                        AS recency_days,
+        COUNT(DISTINCT r.rental_id)                                     AS frequency,
+        ROUND(SUM(p.amount)/COUNT(DISTINCT r.rental_id)::NUMERIC, 2)    AS monetary,
+        ROUND(SUM(p.amount)::NUMERIC, 2)                                AS total_spent        
     FROM customer  c
     JOIN rental    r ON c.customer_id = r.customer_id
     JOIN payment   p ON r.rental_id   = p.rental_id
@@ -64,7 +65,7 @@ scored AS (
     FROM raw_rfm, thresholds
 )
 SELECT customer_id, customer_name, email,
-       recency_days, frequency, monetary,
+       recency_days, frequency, monetary, total_spent,
        r_score, f_score, m_score
 FROM scored
 ORDER BY monetary DESC
